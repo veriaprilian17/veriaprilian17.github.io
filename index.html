@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cyber Drift Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root { --neon: #00f2ff; --pink: #ff007f; --bg: #08080a; }
+        body { 
+            margin: 0; overflow: hidden; background: var(--bg); 
+            font-family: 'Inter', sans-serif; transform: rotate(180deg);
+            height: 100vh; width: 100vw; touch-action: none;
+        }
+        
+        /* Overlay Menu (TETAP SAMA) */
+        #overlay {
+            position: fixed; inset: 0; background: radial-gradient(circle, #1a1a2e, #000);
+            z-index: 1000; display: flex; align-items: center; justify-content: center;
+        }
+        .glass {
+            background: rgba(255,255,255,0.05); backdrop-filter: blur(20px);
+            border-radius: 40px; padding: 40px; border: 1px solid rgba(255,255,255,0.1);
+            text-align: center; width: 85%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        /* City Arena */
+        #world {
+            position: absolute; width: 4000px; height: 4000px;
+            background-color: var(--bg);
+            background-image: 
+                linear-gradient(rgba(0, 242, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 242, 255, 0.1) 1px, transparent 1px);
+            background-size: 200px 200px;
+        }
+
+        /* Car Player */
+        #player {
+            position: absolute; width: 40px; height: 80px;
+            background: var(--neon); border-radius: 8px;
+            box-shadow: 0 0 30px var(--neon), 0 0 10px white;
+            z-index: 99; top: 2000px; left: 2000px;
+            transition: transform 0.05s linear;
+        }
+        /* Efek Lampu Belakang Mobil */
+        #player::after {
+            content: ''; position: absolute; bottom: -5px; left: 5px; right: 5px;
+            height: 10px; background: var(--pink); filter: blur(5px);
+        }
+
+        /* Buildings/Obstacles */
+        .building {
+            position: absolute; background: rgba(255,255,255,0.03);
+            border: 2px solid rgba(0, 242, 255, 0.2); box-shadow: inset 0 0 20px rgba(0, 242, 255, 0.1);
+        }
+
+        /* UI Control Atas */
+        #ui-top {
+            position: fixed; top: 40px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center; z-index: 500;
+        }
+        #analog-base {
+            width: 150px; height: 150px; background: rgba(255,255,255,0.05);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            position: relative; backdrop-filter: blur(10px);
+        }
+        #stick {
+            width: 65px; height: 65px; background: var(--neon);
+            border-radius: 50%; position: absolute; top: 42.5px; left: 42.5px;
+            box-shadow: 0 0 25px var(--neon); pointer-events: none;
+        }
+        #speed-meter {
+            margin-top: 10px; font-weight: 900; color: var(--pink);
+            text-shadow: 0 0 10px var(--pink); font-size: 20px;
+        }
+
+        .btn-genz {
+            background: var(--neon); color: #000; border: none;
+            padding: 15px; border-radius: 20px; font-weight: 900;
+            width: 100%; margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <div class="glass">
+            <h1 style="color:var(--neon); font-weight:900; font-size: 2.5rem;">CYBER DRIFT</h1>
+            <p style="color:rgba(255,255,255,0.5); margin-bottom: 30px;">OPEN WORLD SURVIVAL</p>
+            <button class="btn-genz" onclick="start('Easy')">EASY DRIVE</button>
+            <button class="btn-genz" onclick="start('Normal')">PRO DRIFTER</button>
+            <button class="btn-genz" style="background:var(--pink)" onclick="start('WNI')">WNI (NO BRAKES)</button>
+        </div>
+    </div>
+
+    <div id="ui-top">
+        <div id="analog-base"><div id="stick"></div></div>
+        <div id="speed-meter">0 KM/H</div>
+    </div>
+
+    <div id="world">
+        <div id="player"></div>
+        <div class="building" style="top: 1500px; left: 1500px; width: 300px; height: 300px;"></div>
+        <div class="building" style="top: 2500px; left: 1800px; width: 400px; height: 200px;"></div>
+        <div class="building" style="top: 1800px; left: 2400px; width: 200px; height: 500px;"></div>
+    </div>
+
+    <script>
+        let pX = 2000, pY = 2000, angle = 0, speed = 0, maxSpeed = 15;
+        let moveX = 0, moveY = 0, isDown = false;
+        let friction = 0.98; // Efek licin/drift
+        
+        const player = document.getElementById('player');
+        const world = document.getElementById('world');
+        const stick = document.getElementById('stick');
+        const meter = document.getElementById('speed-meter');
+
+        function start(lvl) {
+            document.getElementById('overlay').style.display = 'none';
+            maxSpeed = (lvl === 'WNI') ? 45 : (lvl === 'Normal' ? 25 : 15);
+            loop();
+        }
+
+        window.addEventListener('touchstart', () => isDown = true);
+        window.addEventListener('touchend', () => {
+            isDown = false; moveX = 0; moveY = 0;
+            stick.style.transform = `translate(0,0)`;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if(!isDown) return;
+            let t = e.touches[0];
+            let b = document.getElementById('analog-base').getBoundingClientRect();
+            let x = t.clientX - (b.left + 75);
+            let y = t.clientY - (b.top + 75);
+            let dist = Math.min(Math.sqrt(x*x + y*y), 50);
+            let ang = Math.atan2(y, x);
+            
+            moveX = Math.cos(ang) * (dist/50);
+            moveY = Math.sin(ang) * (dist/50);
+            stick.style.transform = `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
+            
+            // Update Rotasi Mobil
+            angle = ang * (180/Math.PI) - 90;
+        });
+
+        function loop() {
+            if(isDown) {
+                speed += 0.5;
+                if(speed > maxSpeed) speed = maxSpeed;
+            } else {
+                speed *= friction;
+            }
+
+            // Gerakan (Inverted logic karena HP terbalik)
+            pX -= Math.cos((angle + 90) * (Math.PI/180)) * speed;
+            pY -= Math.sin((angle + 90) * (Math.PI/180)) * speed;
+
+            player.style.left = pX + 'px';
+            player.style.top = pY + 'px';
+            player.style.transform = `rotate(${angle}px)`; // Fix: should be angle deg
+            player.style.transform = `rotate(${angle}deg)`;
+
+            // Camera Follow Smooth
+            let camX = -pX + window.innerWidth/2;
+            let camY = -pY + window.innerHeight/2;
+            world.style.transform = `translate(${camX}px, ${camY}px)`;
+            
+            meter.innerText = Math.round(speed * 10) + " KM/H";
+
+            checkCollision();
+            requestAnimationFrame(loop);
+        }
+
+        function checkCollision() {
+            const buildings = document.querySelectorAll('.building');
+            buildings.forEach(b => {
+                let r1 = player.getBoundingClientRect();
+                let r2 = b.getBoundingClientRect();
+                if(!(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom)) {
+                    speed = -2; // Terpental saat nabrak
+                    if(navigator.vibrate) navigator.vibrate(100);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cyber Drift Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root { --neon: #00f2ff; --pink: #ff007f; --bg: #08080a; }
+        body { 
+            margin: 0; overflow: hidden; background: var(--bg); 
+            font-family: 'Inter', sans-serif; transform: rotate(180deg);
+            height: 100vh; width: 100vw; touch-action: none;
+        }
+        
+        /* Overlay Menu (TETAP SAMA) */
+        #overlay {
+            position: fixed; inset: 0; background: radial-gradient(circle, #1a1a2e, #000);
+            z-index: 1000; display: flex; align-items: center; justify-content: center;
+        }
+        .glass {
+            background: rgba(255,255,255,0.05); backdrop-filter: blur(20px);
+            border-radius: 40px; padding: 40px; border: 1px solid rgba(255,255,255,0.1);
+            text-align: center; width: 85%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        /* City Arena */
+        #world {
+            position: absolute; width: 4000px; height: 4000px;
+            background-color: var(--bg);
+            background-image: 
+                linear-gradient(rgba(0, 242, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 242, 255, 0.1) 1px, transparent 1px);
+            background-size: 200px 200px;
+        }
+
+        /* Car Player */
+        #player {
+            position: absolute; width: 40px; height: 80px;
+            background: var(--neon); border-radius: 8px;
+            box-shadow: 0 0 30px var(--neon), 0 0 10px white;
+            z-index: 99; top: 2000px; left: 2000px;
+            transition: transform 0.05s linear;
+        }
+        /* Efek Lampu Belakang Mobil */
+        #player::after {
+            content: ''; position: absolute; bottom: -5px; left: 5px; right: 5px;
+            height: 10px; background: var(--pink); filter: blur(5px);
+        }
+
+        /* Buildings/Obstacles */
+        .building {
+            position: absolute; background: rgba(255,255,255,0.03);
+            border: 2px solid rgba(0, 242, 255, 0.2); box-shadow: inset 0 0 20px rgba(0, 242, 255, 0.1);
+        }
+
+        /* UI Control Atas */
+        #ui-top {
+            position: fixed; top: 40px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center; z-index: 500;
+        }
+        #analog-base {
+            width: 150px; height: 150px; background: rgba(255,255,255,0.05);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            position: relative; backdrop-filter: blur(10px);
+        }
+        #stick {
+            width: 65px; height: 65px; background: var(--neon);
+            border-radius: 50%; position: absolute; top: 42.5px; left: 42.5px;
+            box-shadow: 0 0 25px var(--neon); pointer-events: none;
+        }
+        #speed-meter {
+            margin-top: 10px; font-weight: 900; color: var(--pink);
+            text-shadow: 0 0 10px var(--pink); font-size: 20px;
+        }
+
+        .btn-genz {
+            background: var(--neon); color: #000; border: none;
+            padding: 15px; border-radius: 20px; font-weight: 900;
+            width: 100%; margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <div class="glass">
+            <h1 style="color:var(--neon); font-weight:900; font-size: 2.5rem;">CYBER DRIFT</h1>
+            <p style="color:rgba(255,255,255,0.5); margin-bottom: 30px;">OPEN WORLD SURVIVAL</p>
+            <button class="btn-genz" onclick="start('Easy')">EASY DRIVE</button>
+            <button class="btn-genz" onclick="start('Normal')">PRO DRIFTER</button>
+            <button class="btn-genz" style="background:var(--pink)" onclick="start('WNI')">WNI (NO BRAKES)</button>
+        </div>
+    </div>
+
+    <div id="ui-top">
+        <div id="analog-base"><div id="stick"></div></div>
+        <div id="speed-meter">0 KM/H</div>
+    </div>
+
+    <div id="world">
+        <div id="player"></div>
+        <div class="building" style="top: 1500px; left: 1500px; width: 300px; height: 300px;"></div>
+        <div class="building" style="top: 2500px; left: 1800px; width: 400px; height: 200px;"></div>
+        <div class="building" style="top: 1800px; left: 2400px; width: 200px; height: 500px;"></div>
+    </div>
+
+    <script>
+        let pX = 2000, pY = 2000, angle = 0, speed = 0, maxSpeed = 15;
+        let moveX = 0, moveY = 0, isDown = false;
+        let friction = 0.98; // Efek licin/drift
+        
+        const player = document.getElementById('player');
+        const world = document.getElementById('world');
+        const stick = document.getElementById('stick');
+        const meter = document.getElementById('speed-meter');
+
+        function start(lvl) {
+            document.getElementById('overlay').style.display = 'none';
+            maxSpeed = (lvl === 'WNI') ? 45 : (lvl === 'Normal' ? 25 : 15);
+            loop();
+        }
+
+        window.addEventListener('touchstart', () => isDown = true);
+        window.addEventListener('touchend', () => {
+            isDown = false; moveX = 0; moveY = 0;
+            stick.style.transform = `translate(0,0)`;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if(!isDown) return;
+            let t = e.touches[0];
+            let b = document.getElementById('analog-base').getBoundingClientRect();
+            let x = t.clientX - (b.left + 75);
+            let y = t.clientY - (b.top + 75);
+            let dist = Math.min(Math.sqrt(x*x + y*y), 50);
+            let ang = Math.atan2(y, x);
+            
+            moveX = Math.cos(ang) * (dist/50);
+            moveY = Math.sin(ang) * (dist/50);
+            stick.style.transform = `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
+            
+            // Update Rotasi Mobil
+            angle = ang * (180/Math.PI) - 90;
+        });
+
+        function loop() {
+            if(isDown) {
+                speed += 0.5;
+                if(speed > maxSpeed) speed = maxSpeed;
+            } else {
+                speed *= friction;
+            }
+
+            // Gerakan (Inverted logic karena HP terbalik)
+            pX -= Math.cos((angle + 90) * (Math.PI/180)) * speed;
+            pY -= Math.sin((angle + 90) * (Math.PI/180)) * speed;
+
+            player.style.left = pX + 'px';
+            player.style.top = pY + 'px';
+            player.style.transform = `rotate(${angle}px)`; // Fix: should be angle deg
+            player.style.transform = `rotate(${angle}deg)`;
+
+            // Camera Follow Smooth
+            let camX = -pX + window.innerWidth/2;
+            let camY = -pY + window.innerHeight/2;
+            world.style.transform = `translate(${camX}px, ${camY}px)`;
+            
+            meter.innerText = Math.round(speed * 10) + " KM/H";
+
+            checkCollision();
+            requestAnimationFrame(loop);
+        }
+
+        function checkCollision() {
+            const buildings = document.querySelectorAll('.building');
+            buildings.forEach(b => {
+                let r1 = player.getBoundingClientRect();
+                let r2 = b.getBoundingClientRect();
+                if(!(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom)) {
+                    speed = -2; // Terpental saat nabrak
+                    if(navigator.vibrate) navigator.vibrate(100);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cyber Drift Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root { --neon: #00f2ff; --pink: #ff007f; --bg: #08080a; }
+        body { 
+            margin: 0; overflow: hidden; background: var(--bg); 
+            font-family: 'Inter', sans-serif; transform: rotate(180deg);
+            height: 100vh; width: 100vw; touch-action: none;
+        }
+        
+        /* Overlay Menu (TETAP SAMA) */
+        #overlay {
+            position: fixed; inset: 0; background: radial-gradient(circle, #1a1a2e, #000);
+            z-index: 1000; display: flex; align-items: center; justify-content: center;
+        }
+        .glass {
+            background: rgba(255,255,255,0.05); backdrop-filter: blur(20px);
+            border-radius: 40px; padding: 40px; border: 1px solid rgba(255,255,255,0.1);
+            text-align: center; width: 85%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        /* City Arena */
+        #world {
+            position: absolute; width: 4000px; height: 4000px;
+            background-color: var(--bg);
+            background-image: 
+                linear-gradient(rgba(0, 242, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 242, 255, 0.1) 1px, transparent 1px);
+            background-size: 200px 200px;
+        }
+
+        /* Car Player */
+        #player {
+            position: absolute; width: 40px; height: 80px;
+            background: var(--neon); border-radius: 8px;
+            box-shadow: 0 0 30px var(--neon), 0 0 10px white;
+            z-index: 99; top: 2000px; left: 2000px;
+            transition: transform 0.05s linear;
+        }
+        /* Efek Lampu Belakang Mobil */
+        #player::after {
+            content: ''; position: absolute; bottom: -5px; left: 5px; right: 5px;
+            height: 10px; background: var(--pink); filter: blur(5px);
+        }
+
+        /* Buildings/Obstacles */
+        .building {
+            position: absolute; background: rgba(255,255,255,0.03);
+            border: 2px solid rgba(0, 242, 255, 0.2); box-shadow: inset 0 0 20px rgba(0, 242, 255, 0.1);
+        }
+
+        /* UI Control Atas */
+        #ui-top {
+            position: fixed; top: 40px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center; z-index: 500;
+        }
+        #analog-base {
+            width: 150px; height: 150px; background: rgba(255,255,255,0.05);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            position: relative; backdrop-filter: blur(10px);
+        }
+        #stick {
+            width: 65px; height: 65px; background: var(--neon);
+            border-radius: 50%; position: absolute; top: 42.5px; left: 42.5px;
+            box-shadow: 0 0 25px var(--neon); pointer-events: none;
+        }
+        #speed-meter {
+            margin-top: 10px; font-weight: 900; color: var(--pink);
+            text-shadow: 0 0 10px var(--pink); font-size: 20px;
+        }
+
+        .btn-genz {
+            background: var(--neon); color: #000; border: none;
+            padding: 15px; border-radius: 20px; font-weight: 900;
+            width: 100%; margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <div class="glass">
+            <h1 style="color:var(--neon); font-weight:900; font-size: 2.5rem;">CYBER DRIFT</h1>
+            <p style="color:rgba(255,255,255,0.5); margin-bottom: 30px;">OPEN WORLD SURVIVAL</p>
+            <button class="btn-genz" onclick="start('Easy')">EASY DRIVE</button>
+            <button class="btn-genz" onclick="start('Normal')">PRO DRIFTER</button>
+            <button class="btn-genz" style="background:var(--pink)" onclick="start('WNI')">WNI (NO BRAKES)</button>
+        </div>
+    </div>
+
+    <div id="ui-top">
+        <div id="analog-base"><div id="stick"></div></div>
+        <div id="speed-meter">0 KM/H</div>
+    </div>
+
+    <div id="world">
+        <div id="player"></div>
+        <div class="building" style="top: 1500px; left: 1500px; width: 300px; height: 300px;"></div>
+        <div class="building" style="top: 2500px; left: 1800px; width: 400px; height: 200px;"></div>
+        <div class="building" style="top: 1800px; left: 2400px; width: 200px; height: 500px;"></div>
+    </div>
+
+    <script>
+        let pX = 2000, pY = 2000, angle = 0, speed = 0, maxSpeed = 15;
+        let moveX = 0, moveY = 0, isDown = false;
+        let friction = 0.98; // Efek licin/drift
+        
+        const player = document.getElementById('player');
+        const world = document.getElementById('world');
+        const stick = document.getElementById('stick');
+        const meter = document.getElementById('speed-meter');
+
+        function start(lvl) {
+            document.getElementById('overlay').style.display = 'none';
+            maxSpeed = (lvl === 'WNI') ? 45 : (lvl === 'Normal' ? 25 : 15);
+            loop();
+        }
+
+        window.addEventListener('touchstart', () => isDown = true);
+        window.addEventListener('touchend', () => {
+            isDown = false; moveX = 0; moveY = 0;
+            stick.style.transform = `translate(0,0)`;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if(!isDown) return;
+            let t = e.touches[0];
+            let b = document.getElementById('analog-base').getBoundingClientRect();
+            let x = t.clientX - (b.left + 75);
+            let y = t.clientY - (b.top + 75);
+            let dist = Math.min(Math.sqrt(x*x + y*y), 50);
+            let ang = Math.atan2(y, x);
+            
+            moveX = Math.cos(ang) * (dist/50);
+            moveY = Math.sin(ang) * (dist/50);
+            stick.style.transform = `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
+            
+            // Update Rotasi Mobil
+            angle = ang * (180/Math.PI) - 90;
+        });
+
+        function loop() {
+            if(isDown) {
+                speed += 0.5;
+                if(speed > maxSpeed) speed = maxSpeed;
+            } else {
+                speed *= friction;
+            }
+
+            // Gerakan (Inverted logic karena HP terbalik)
+            pX -= Math.cos((angle + 90) * (Math.PI/180)) * speed;
+            pY -= Math.sin((angle + 90) * (Math.PI/180)) * speed;
+
+            player.style.left = pX + 'px';
+            player.style.top = pY + 'px';
+            player.style.transform = `rotate(${angle}px)`; // Fix: should be angle deg
+            player.style.transform = `rotate(${angle}deg)`;
+
+            // Camera Follow Smooth
+            let camX = -pX + window.innerWidth/2;
+            let camY = -pY + window.innerHeight/2;
+            world.style.transform = `translate(${camX}px, ${camY}px)`;
+            
+            meter.innerText = Math.round(speed * 10) + " KM/H";
+
+            checkCollision();
+            requestAnimationFrame(loop);
+        }
+
+        function checkCollision() {
+            const buildings = document.querySelectorAll('.building');
+            buildings.forEach(b => {
+                let r1 = player.getBoundingClientRect();
+                let r2 = b.getBoundingClientRect();
+                if(!(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom)) {
+                    speed = -2; // Terpental saat nabrak
+                    if(navigator.vibrate) navigator.vibrate(100);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cyber Drift Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root { --neon: #00f2ff; --pink: #ff007f; --bg: #08080a; }
+        body { 
+            margin: 0; overflow: hidden; background: var(--bg); 
+            font-family: 'Inter', sans-serif; transform: rotate(180deg);
+            height: 100vh; width: 100vw; touch-action: none;
+        }
+        
+        /* Overlay Menu (TETAP SAMA) */
+        #overlay {
+            position: fixed; inset: 0; background: radial-gradient(circle, #1a1a2e, #000);
+            z-index: 1000; display: flex; align-items: center; justify-content: center;
+        }
+        .glass {
+            background: rgba(255,255,255,0.05); backdrop-filter: blur(20px);
+            border-radius: 40px; padding: 40px; border: 1px solid rgba(255,255,255,0.1);
+            text-align: center; width: 85%; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        /* City Arena */
+        #world {
+            position: absolute; width: 4000px; height: 4000px;
+            background-color: var(--bg);
+            background-image: 
+                linear-gradient(rgba(0, 242, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 242, 255, 0.1) 1px, transparent 1px);
+            background-size: 200px 200px;
+        }
+
+        /* Car Player */
+        #player {
+            position: absolute; width: 40px; height: 80px;
+            background: var(--neon); border-radius: 8px;
+            box-shadow: 0 0 30px var(--neon), 0 0 10px white;
+            z-index: 99; top: 2000px; left: 2000px;
+            transition: transform 0.05s linear;
+        }
+        /* Efek Lampu Belakang Mobil */
+        #player::after {
+            content: ''; position: absolute; bottom: -5px; left: 5px; right: 5px;
+            height: 10px; background: var(--pink); filter: blur(5px);
+        }
+
+        /* Buildings/Obstacles */
+        .building {
+            position: absolute; background: rgba(255,255,255,0.03);
+            border: 2px solid rgba(0, 242, 255, 0.2); box-shadow: inset 0 0 20px rgba(0, 242, 255, 0.1);
+        }
+
+        /* UI Control Atas */
+        #ui-top {
+            position: fixed; top: 40px; left: 0; right: 0;
+            display: flex; flex-direction: column; align-items: center; z-index: 500;
+        }
+        #analog-base {
+            width: 150px; height: 150px; background: rgba(255,255,255,0.05);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            position: relative; backdrop-filter: blur(10px);
+        }
+        #stick {
+            width: 65px; height: 65px; background: var(--neon);
+            border-radius: 50%; position: absolute; top: 42.5px; left: 42.5px;
+            box-shadow: 0 0 25px var(--neon); pointer-events: none;
+        }
+        #speed-meter {
+            margin-top: 10px; font-weight: 900; color: var(--pink);
+            text-shadow: 0 0 10px var(--pink); font-size: 20px;
+        }
+
+        .btn-genz {
+            background: var(--neon); color: #000; border: none;
+            padding: 15px; border-radius: 20px; font-weight: 900;
+            width: 100%; margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <div class="glass">
+            <h1 style="color:var(--neon); font-weight:900; font-size: 2.5rem;">CYBER DRIFT</h1>
+            <p style="color:rgba(255,255,255,0.5); margin-bottom: 30px;">OPEN WORLD SURVIVAL</p>
+            <button class="btn-genz" onclick="start('Easy')">EASY DRIVE</button>
+            <button class="btn-genz" onclick="start('Normal')">PRO DRIFTER</button>
+            <button class="btn-genz" style="background:var(--pink)" onclick="start('WNI')">WNI (NO BRAKES)</button>
+        </div>
+    </div>
+
+    <div id="ui-top">
+        <div id="analog-base"><div id="stick"></div></div>
+        <div id="speed-meter">0 KM/H</div>
+    </div>
+
+    <div id="world">
+        <div id="player"></div>
+        <div class="building" style="top: 1500px; left: 1500px; width: 300px; height: 300px;"></div>
+        <div class="building" style="top: 2500px; left: 1800px; width: 400px; height: 200px;"></div>
+        <div class="building" style="top: 1800px; left: 2400px; width: 200px; height: 500px;"></div>
+    </div>
+
+    <script>
+        let pX = 2000, pY = 2000, angle = 0, speed = 0, maxSpeed = 15;
+        let moveX = 0, moveY = 0, isDown = false;
+        let friction = 0.98; // Efek licin/drift
+        
+        const player = document.getElementById('player');
+        const world = document.getElementById('world');
+        const stick = document.getElementById('stick');
+        const meter = document.getElementById('speed-meter');
+
+        function start(lvl) {
+            document.getElementById('overlay').style.display = 'none';
+            maxSpeed = (lvl === 'WNI') ? 45 : (lvl === 'Normal' ? 25 : 15);
+            loop();
+        }
+
+        window.addEventListener('touchstart', () => isDown = true);
+        window.addEventListener('touchend', () => {
+            isDown = false; moveX = 0; moveY = 0;
+            stick.style.transform = `translate(0,0)`;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if(!isDown) return;
+            let t = e.touches[0];
+            let b = document.getElementById('analog-base').getBoundingClientRect();
+            let x = t.clientX - (b.left + 75);
+            let y = t.clientY - (b.top + 75);
+            let dist = Math.min(Math.sqrt(x*x + y*y), 50);
+            let ang = Math.atan2(y, x);
+            
+            moveX = Math.cos(ang) * (dist/50);
+            moveY = Math.sin(ang) * (dist/50);
+            stick.style.transform = `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
+            
+            // Update Rotasi Mobil
+            angle = ang * (180/Math.PI) - 90;
+        });
+
+        function loop() {
+            if(isDown) {
+                speed += 0.5;
+                if(speed > maxSpeed) speed = maxSpeed;
+            } else {
+                speed *= friction;
+            }
+
+            // Gerakan (Inverted logic karena HP terbalik)
+            pX -= Math.cos((angle + 90) * (Math.PI/180)) * speed;
+            pY -= Math.sin((angle + 90) * (Math.PI/180)) * speed;
+
+            player.style.left = pX + 'px';
+            player.style.top = pY + 'px';
+            player.style.transform = `rotate(${angle}px)`; // Fix: should be angle deg
+            player.style.transform = `rotate(${angle}deg)`;
+
+            // Camera Follow Smooth
+            let camX = -pX + window.innerWidth/2;
+            let camY = -pY + window.innerHeight/2;
+            world.style.transform = `translate(${camX}px, ${camY}px)`;
+            
+            meter.innerText = Math.round(speed * 10) + " KM/H";
+
+            checkCollision();
+            requestAnimationFrame(loop);
+        }
+
+        function checkCollision() {
+            const buildings = document.querySelectorAll('.building');
+            buildings.forEach(b => {
+                let r1 = player.getBoundingClientRect();
+                let r2 = b.getBoundingClientRect();
+                if(!(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom)) {
+                    speed = -2; // Terpental saat nabrak
+                    if(navigator.vibrate) navigator.vibrate(100);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
